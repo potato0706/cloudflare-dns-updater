@@ -1,0 +1,6 @@
+services:
+    cloudflare-dns-updater:
+        build: .
+        container_name: cloudflare-dns-updater
+        restart: always
+        env_file: .env
