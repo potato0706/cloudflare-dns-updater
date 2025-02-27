@@ -23,8 +23,8 @@ export class DNSRecordError extends Error {
 class CloudflareDNSUpdater {
     /** The current public IP address of the device. */
     private currentIP?: string;
-    /** The ID of the DNS record to update. */
-    private recordID?: string;
+    /** The IDs of the DNS records to update. */
+    private recordIDs: string[] = [];
 
     /**
      * Creates an instance of CloudflareDNSUpdater.
@@ -39,28 +39,28 @@ class CloudflareDNSUpdater {
     ) {}
 
     /**
-     * Retrieves and stores the DNS record ID to be updated.
+     * Retrieves and stores the DNS record IDs to be updated.
      */
     async initialize(): Promise<void> {
-        this.recordID = await this.retryHandler.execute(() =>
-            this.getRecordID()
+        this.recordIDs = await this.retryHandler.execute(() =>
+            this.getRecordIDs()
         );
-        Logger.log('DNS record ID retrieved successfully');
+        Logger.log(`DNS record IDs retrieved: ${this.recordIDs.join(', ')}`);
     }
 
     /**
-     * Fetches the DNS record ID for the configured domain.
-     * @throws Will throw a [DNSRecordError](src/types/errors.d.ts) if the DNS record is not found.
+     * Fetches IDs for all A-type DNS records matching the configured domain.
+     * @throws Will throw a [DNSRecordError](src/types/errors.d.ts) if no DNS records are found.
      */
-    private async getRecordID(): Promise<string> {
+    private async getRecordIDs(): Promise<string[]> {
         const data = await this.apiClient.getDNSRecords();
-        const record = data.result.find(
+        const records = data.result.filter(
             (d: any) => d.name === this.config.DOMAIN && d.type === 'A'
         );
-        if (!record) {
-            throw new DNSRecordError('DNS record not found');
+        if (!records.length) {
+            throw new DNSRecordError('No DNS records found');
         }
-        return record.id;
+        return records.map((r: any) => r.id);
     }
 
     /**
@@ -74,15 +74,18 @@ class CloudflareDNSUpdater {
     }
 
     /**
-     * Checks if the current public IP changed and updates the Cloudflare DNS record if necessary.
+     * Checks if the current public IP changed and updates the Cloudflare DNS records if necessary.
      */
     async checkAndUpdateIP(): Promise<void> {
         const newIP = await this.retryHandler.execute(() => this.getPublicIP());
-
         if (this.currentIP !== newIP) {
-            await this.retryHandler.execute(() =>
-                this.apiClient.updateDNSRecord(this.recordID!, newIP)
-            );
+            await this.retryHandler.execute(async () => {
+                await Promise.all(
+                    this.recordIDs.map((id) =>
+                        this.apiClient.updateDNSRecord(id, newIP)
+                    )
+                );
+            });
             Logger.log(
                 `IP updated from ${this.currentIP || 'undefined'} → ${newIP}`
             );
